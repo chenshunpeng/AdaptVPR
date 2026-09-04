@@ -1,0 +1,1 @@
+{"example_only":true,"source_id":"src_7b93d9c61e5a4f20","route":"dual","weather":"rain","occlusion":"vehicle","s_geo":0.81,"s_div":0.23,"tau_geo":0.72,"tau_div":0.12,"geo_ok":true,"div_ok":true,"passed":true,"eligible_for_training":true,"stop_reason":"passed"}
