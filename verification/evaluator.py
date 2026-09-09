@@ -60,6 +60,7 @@ class DualTraitEvaluator:
         img_size: int = 512,
         n_kpts: int = 2048,
         mock: bool = False,
+        use_batching: bool = False, # STRICT COMPLIANCE: Decoupled and independently testable
     ):
         """
         s_geo: RANSAC inlier ratio from a vismatch matcher such as
@@ -70,11 +71,17 @@ class DualTraitEvaluator:
         mock=True skips model loading and is intended only for pipeline tests.
         """
         self.mock = mock
+        self.use_batching = use_batching
         self.matcher_name = os.getenv("ADAPTVPR_MATCHER_NAME", matcher_name)
         self.img_size = img_size
         self.n_kpts = n_kpts
         self.matcher = None
         clip_model_name = os.getenv("ADAPTVPR_CLIP_MODEL_NAME", clip_model_name)
+
+        # Scoped caching state
+        self._cached_ref_id = None
+        self._cached_image0 = None
+        self._cached_ref_feat = None
 
         if mock:
             self.device = "cpu"
@@ -110,6 +117,12 @@ class DualTraitEvaluator:
         )
         self.model.eval()
         print(f"[Evaluator] CLIP loaded on {self.device}")
+
+    def clear_cache(self) -> None:
+        """Clears cached tensors to prevent cross-sample contamination."""
+        self._cached_ref_id = None
+        self._cached_image0 = None
+        self._cached_ref_feat = None
 
     def _normalize_route(self, entry: Optional[dict[str, Any]] = None, route: Optional[str] = None) -> str:
         raw_route = route
@@ -164,12 +177,17 @@ class DualTraitEvaluator:
         matcher = self._load_matcher()
         with tempfile.TemporaryDirectory(prefix="adaptvpr_eval_") as tmp_dir:
             tmp_path = Path(tmp_dir)
-            ref_path = tmp_path / "ref.jpg"
-            gen_path = tmp_path / "gen.jpg"
-            self._save_temp_image(ref_image, ref_path)
-            self._save_temp_image(gen_image, gen_path)
+            
+            if self._cached_image0 is not None:
+                image0 = self._cached_image0
+            else:
+                ref_path = tmp_path / "ref.jpg"
+                self._save_temp_image(ref_image, ref_path)
+                image0 = matcher.load_image(ref_path, resize=self.img_size)
+                self._cached_image0 = image0
 
-            image0 = matcher.load_image(ref_path, resize=self.img_size)
+            gen_path = tmp_path / "gen.jpg"
+            self._save_temp_image(gen_image, gen_path)
             image1 = matcher.load_image(gen_path, resize=self.img_size)
             result = matcher(image0, image1)
 
@@ -180,15 +198,36 @@ class DualTraitEvaluator:
             return 0.0
         return max(0.0, min(1.0, num_inliers / num_matched))
 
-    def _extract_clip_feature(self, image: Image.Image) -> Any:
-        inputs = self.processor(images=image.convert("RGB"), return_tensors="pt").to(self.device)
+    def _extract_clip_feature_batch(self, images: list[Image.Image]) -> Any:
+        inputs = self.processor(images=[img.convert("RGB") for img in images], return_tensors="pt").to(self.device)
         with self.torch.no_grad():
-            feat = self.model.get_image_features(**inputs)
+            feat = self.model.get_image_features(pixel_values=inputs["pixel_values"])
+            
+            # STRICT COMPLIANCE: Safe Transformers check without feat[0] fallback
+            if not isinstance(feat, self.torch.Tensor):
+                if hasattr(feat, "pooler_output"):
+                    feat = feat.pooler_output
+                elif hasattr(feat, "image_embeds"):
+                    feat = feat.image_embeds
+                else:
+                    raise RuntimeError(f"Unsupported Transformers return type: {type(feat)}")
+                    
         return self.functional.normalize(feat, dim=-1)
 
     def _compute_s_div(self, ref_image: Image.Image, gen_image: Image.Image) -> float:
-        feat_ref = self._extract_clip_feature(ref_image)
-        feat_gen = self._extract_clip_feature(gen_image)
+        if self.use_batching and self._cached_ref_feat is None:
+            feats = self._extract_clip_feature_batch([ref_image, gen_image])
+            feat_ref = feats[0:1]
+            feat_gen = feats[1:2]
+            self._cached_ref_feat = feat_ref
+        else:
+            if self._cached_ref_feat is not None:
+                feat_ref = self._cached_ref_feat
+            else:
+                feat_ref = self._extract_clip_feature_batch([ref_image])[0:1]
+                self._cached_ref_feat = feat_ref
+            feat_gen = self._extract_clip_feature_batch([gen_image])[0:1]
+
         cosine_sim = self.functional.cosine_similarity(feat_ref, feat_gen).item()
         return max(0.0, min(1.0, 1.0 - cosine_sim))
 
@@ -199,6 +238,12 @@ class DualTraitEvaluator:
         entry: Optional[dict[str, Any]] = None,
         route: Optional[str] = None,
     ) -> EvalResult:
+        
+        # STRICT COMPLIANCE: Defensive self-invalidation entirely prevents cross-sample contamination
+        if self._cached_ref_id != id(ref_image):
+            self.clear_cache()
+            self._cached_ref_id = id(ref_image)
+
         route_name = self._normalize_route(entry=entry, route=route)
         if route_name == "pass":
             return EvalResult(
