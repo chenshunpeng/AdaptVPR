@@ -532,6 +532,10 @@ Return strict JSON:
                 "requires_geometric_review": True,
                 "audits": audits,
             }
+        # Clear the evaluator cache after the sample is complete.
+        if hasattr(self.evaluator, "clear_cache"):
+            self.evaluator.clear_cache()
+
         return {
             "accepted": False,
             "resolution": "structure_audit_unavailable",
@@ -619,124 +623,129 @@ Return strict JSON:
         base_seed: int,
         max_reflections: int = 3,
     ) -> dict:
-        route = str(decision.get("route"))
-        if route not in {"local", "dual"}:
-            raise ValueError(f"Reflection is only supported for Local/Dual, got {route!r}")
+        try:
+            route = str(decision.get("route"))
+            if route not in {"local", "dual"}:
+                raise ValueError(f"Reflection is only supported for Local/Dual, got {route!r}")
 
-        used_hashes = {_prompt_hash(initial_prompt)}
-        previous_candidate = initial_candidate
-        previous_prompt = initial_prompt
-        feedback: dict = {"initial_eval": initial_eval}
-        attempts = []
-        accepted_image = None
-        accepted_eval = None
-        last_candidate = initial_candidate
-        last_eval = initial_eval
+            used_hashes = {_prompt_hash(initial_prompt)}
+            previous_candidate = initial_candidate
+            previous_prompt = initial_prompt
+            feedback: dict = {"initial_eval": initial_eval}
+            attempts = []
+            accepted_image = None
+            accepted_eval = None
+            last_candidate = initial_candidate
+            last_eval = initial_eval
 
-        if output_dir is not None:
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-        for round_index in range(1, min(3, max_reflections) + 1):
-            analysis = None
-            raw_analysis = None
-            if route == "dual":
-                prompt, analysis, raw_analysis = self._dual_rewrite(
-                    source, previous_candidate, previous_prompt, feedback, decision, round_index
-                )
-            else:
-                prompt, analysis, raw_analysis = self._local_rewrite(
-                    source, previous_candidate, previous_prompt, feedback, decision, round_index
-                )
-
-            prompt_sha256 = _prompt_hash(prompt)
-            if prompt_sha256 in used_hashes:
-                raise RuntimeError(
-                    f"Repeated reflection prompt before generation: round={round_index} sha256={prompt_sha256}"
-                )
-            used_hashes.add(prompt_sha256)
-
-            seed = self._seed(base_seed, round_index)
-            candidate = self.generate(source, prompt, route, decision, seed)
-            if candidate.size != source.size:
-                candidate = candidate.resize(source.size, Image.Resampling.LANCZOS)
-            candidate_path = None
             if output_dir is not None:
-                candidate_path = output_dir / f"reflection_{round_index}.jpg"
-                candidate.save(candidate_path, quality=95)
+                output_dir.mkdir(parents=True, exist_ok=True)
 
-            eval_result = self.evaluator.evaluate(source, candidate, entry=decision)
-            evaluation = {
-                "passed": bool(eval_result.passed),
-                "s_geo": float(eval_result.s_geo),
-                "s_div": float(eval_result.s_div),
-                "geo_ok": bool(eval_result.geo_ok),
-                "div_ok": bool(eval_result.div_ok),
-                "feedback": eval_result.feedback,
+            for round_index in range(1, min(3, max_reflections) + 1):
+                analysis = None
+                raw_analysis = None
+                if route == "dual":
+                    prompt, analysis, raw_analysis = self._dual_rewrite(
+                        source, previous_candidate, previous_prompt, feedback, decision, round_index
+                    )
+                else:
+                    prompt, analysis, raw_analysis = self._local_rewrite(
+                        source, previous_candidate, previous_prompt, feedback, decision, round_index
+                    )
+
+                prompt_sha256 = _prompt_hash(prompt)
+                if prompt_sha256 in used_hashes:
+                    raise RuntimeError(
+                        f"Repeated reflection prompt before generation: round={round_index} sha256={prompt_sha256}"
+                    )
+                used_hashes.add(prompt_sha256)
+
+                seed = self._seed(base_seed, round_index)
+                candidate = self.generate(source, prompt, route, decision, seed)
+                if candidate.size != source.size:
+                    candidate = candidate.resize(source.size, Image.Resampling.LANCZOS)
+                candidate_path = None
+                if output_dir is not None:
+                    candidate_path = output_dir / f"reflection_{round_index}.jpg"
+                    candidate.save(candidate_path, quality=95)
+
+                eval_result = self.evaluator.evaluate(source, candidate, entry=decision)
+                evaluation = {
+                    "passed": bool(eval_result.passed),
+                    "s_geo": float(eval_result.s_geo),
+                    "s_div": float(eval_result.s_div),
+                    "geo_ok": bool(eval_result.geo_ok),
+                    "div_ok": bool(eval_result.div_ok),
+                    "feedback": eval_result.feedback,
+                }
+                interround = _interround_l1(previous_candidate, candidate)
+                legality = self._route_legality_diagnostic(
+                    source, candidate, route, round_index, decision, prompt
+                )
+                border = self._border_diagnostic(candidate, route)
+                structure = self._structure_diagnostic(source, candidate)
+                visible = self._visible_change_diagnostic(
+                    previous_candidate, candidate, round_index, route, decision
+                )
+                acceptance = self._acceptance_decision(
+                    initial_eval, evaluation, interround, [legality, border, structure, visible]
+                )
+
+                attempt = {
+                    "round": round_index + 1,
+                    "reflection_index": round_index,
+                    "seed": seed,
+                    "generation_mode": "source_anchored_categorical_reflection",
+                    "prompt": prompt,
+                    "effective_prompt": prompt,
+                    "prompt_sha256": prompt_sha256,
+                    "image_path": str(candidate_path) if candidate_path else None,
+                    "candidate_sha256": _image_hash(candidate),
+                    "eval": evaluation,
+                    "feedback_for_vlm_prompt_rewrite": feedback,
+                    "feedback_used_for_current_prompt_rewrite": feedback,
+                    "vlm_prompt_analysis": analysis,
+                    "vlm_prompt_raw": raw_analysis,
+                    "route_legality_diagnostic": legality,
+                    "local_border_integrity_diagnostic": border,
+                    "source_structure_lock_diagnostic": structure,
+                    "human_visible_change_diagnostic": visible,
+                    "acceptance_decision": acceptance,
+                }
+                attempts.append(attempt)
+                last_candidate = candidate
+                last_eval = evaluation
+                if acceptance["accepted"]:
+                    accepted_image = candidate
+                    accepted_eval = evaluation
+                    break
+
+                feedback = {
+                    "evaluation": evaluation,
+                    "acceptance_decision": acceptance,
+                    "route_legality_diagnostic": legality,
+                    "local_border_integrity_diagnostic": border,
+                    "source_structure_lock_diagnostic": structure,
+                    "human_visible_change_diagnostic": visible,
+                }
+                attempt["feedback_for_next_prompt_rewrite"] = feedback
+                previous_candidate = candidate
+                previous_prompt = prompt
+
+            return {
+                "passed": accepted_image is not None,
+                "final_image": accepted_image,
+                "final_eval": accepted_eval,
+                "last_candidate": last_candidate,
+                "last_eval": last_eval,
+                "attempts": attempts,
+                "stop_reason": (
+                    "passed_dual_trait_verifier"
+                    if accepted_image is not None
+                    else "max_reflections_without_dual_trait_pass"
+                ),
             }
-            interround = _interround_l1(previous_candidate, candidate)
-            legality = self._route_legality_diagnostic(
-                source, candidate, route, round_index, decision, prompt
-            )
-            border = self._border_diagnostic(candidate, route)
-            structure = self._structure_diagnostic(source, candidate)
-            visible = self._visible_change_diagnostic(
-                previous_candidate, candidate, round_index, route, decision
-            )
-            acceptance = self._acceptance_decision(
-                initial_eval, evaluation, interround, [legality, border, structure, visible]
-            )
-
-            attempt = {
-                "round": round_index + 1,
-                "reflection_index": round_index,
-                "seed": seed,
-                "generation_mode": "source_anchored_categorical_reflection",
-                "prompt": prompt,
-                "effective_prompt": prompt,
-                "prompt_sha256": prompt_sha256,
-                "image_path": str(candidate_path) if candidate_path else None,
-                "candidate_sha256": _image_hash(candidate),
-                "eval": evaluation,
-                "feedback_for_vlm_prompt_rewrite": feedback,
-                "feedback_used_for_current_prompt_rewrite": feedback,
-                "vlm_prompt_analysis": analysis,
-                "vlm_prompt_raw": raw_analysis,
-                "route_legality_diagnostic": legality,
-                "local_border_integrity_diagnostic": border,
-                "source_structure_lock_diagnostic": structure,
-                "human_visible_change_diagnostic": visible,
-                "acceptance_decision": acceptance,
-            }
-            attempts.append(attempt)
-            last_candidate = candidate
-            last_eval = evaluation
-            if acceptance["accepted"]:
-                accepted_image = candidate
-                accepted_eval = evaluation
-                break
-
-            feedback = {
-                "evaluation": evaluation,
-                "acceptance_decision": acceptance,
-                "route_legality_diagnostic": legality,
-                "local_border_integrity_diagnostic": border,
-                "source_structure_lock_diagnostic": structure,
-                "human_visible_change_diagnostic": visible,
-            }
-            attempt["feedback_for_next_prompt_rewrite"] = feedback
-            previous_candidate = candidate
-            previous_prompt = prompt
-
-        return {
-            "passed": accepted_image is not None,
-            "final_image": accepted_image,
-            "final_eval": accepted_eval,
-            "last_candidate": last_candidate,
-            "last_eval": last_eval,
-            "attempts": attempts,
-            "stop_reason": (
-                "passed_dual_trait_verifier"
-                if accepted_image is not None
-                else "max_reflections_without_dual_trait_pass"
-            ),
-        }
+        finally:
+            # Clear the evaluator cache to free memory after the sample is complete or on error
+            if hasattr(self.evaluator, "clear_cache"):
+                self.evaluator.clear_cache()
