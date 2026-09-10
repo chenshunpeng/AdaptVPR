@@ -1,6 +1,7 @@
 # evaluator.py - Dual-Trait Verification
 # Compute s_geo (geometric consistency) and s_div (diversity score).
 
+import hashlib
 import os
 import sys
 import tempfile
@@ -74,6 +75,8 @@ class DualTraitEvaluator:
         self.img_size = img_size
         self.n_kpts = n_kpts
         self.matcher = None
+        self._clip_reference_key = None
+        self._clip_reference_feature = None
         clip_model_name = os.getenv("ADAPTVPR_CLIP_MODEL_NAME", clip_model_name)
 
         if mock:
@@ -160,6 +163,22 @@ class DualTraitEvaluator:
     def _save_temp_image(self, image: Image.Image, path: Path) -> None:
         image.convert("RGB").save(path, format="JPEG", quality=95)
 
+    @staticmethod
+    def _clip_cache_key(image: Image.Image) -> bytes:
+        """Return a stable key for the decoded RGB reference image."""
+
+        rgb = image.convert("RGB")
+        digest = hashlib.sha256()
+        digest.update(f"{rgb.width}x{rgb.height}|RGB|".encode("ascii"))
+        digest.update(rgb.tobytes())
+        return digest.digest()
+
+    def clear_clip_cache(self) -> None:
+        """Release the single-reference CLIP cache."""
+
+        self._clip_reference_key = None
+        self._clip_reference_feature = None
+
     def _compute_s_geo(self, ref_image: Image.Image, gen_image: Image.Image) -> float:
         matcher = self._load_matcher()
         with tempfile.TemporaryDirectory(prefix="adaptvpr_eval_") as tmp_dir:
@@ -184,10 +203,37 @@ class DualTraitEvaluator:
         inputs = self.processor(images=image.convert("RGB"), return_tensors="pt").to(self.device)
         with self.torch.no_grad():
             feat = self.model.get_image_features(**inputs)
-        return self.functional.normalize(feat, dim=-1)
+        if not self.torch.is_tensor(feat):
+            image_embeds = getattr(feat, "image_embeds", None)
+            pooler_output = getattr(feat, "pooler_output", None)
+            if self.torch.is_tensor(image_embeds):
+                feat = image_embeds
+            elif self.torch.is_tensor(pooler_output):
+                # transformers>=5 returns the projected image embedding here.
+                feat = pooler_output
+            else:
+                raise TypeError(
+                    "CLIPModel.get_image_features() returned an unsupported value: "
+                    f"{type(feat).__name__}"
+                )
+        if feat.ndim != 2 or feat.shape[0] != 1:
+            raise ValueError(f"Expected one 2D CLIP image embedding, got shape={tuple(feat.shape)}")
+        projection_dim = getattr(getattr(self.model, "config", None), "projection_dim", None)
+        if projection_dim is not None and feat.shape[-1] != int(projection_dim):
+            raise ValueError(
+                "CLIP image embedding dimension does not match model projection_dim: "
+                f"{feat.shape[-1]} != {projection_dim}"
+            )
+        return self.functional.normalize(feat.float(), dim=-1)
 
     def _compute_s_div(self, ref_image: Image.Image, gen_image: Image.Image) -> float:
-        feat_ref = self._extract_clip_feature(ref_image)
+        reference_key = self._clip_cache_key(ref_image)
+        if reference_key != self._clip_reference_key or self._clip_reference_feature is None:
+            feat_ref = self._extract_clip_feature(ref_image)
+            self._clip_reference_key = reference_key
+            self._clip_reference_feature = feat_ref
+        else:
+            feat_ref = self._clip_reference_feature
         feat_gen = self._extract_clip_feature(gen_image)
         cosine_sim = self.functional.cosine_similarity(feat_ref, feat_gen).item()
         return max(0.0, min(1.0, 1.0 - cosine_sim))

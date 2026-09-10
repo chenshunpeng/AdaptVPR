@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -84,7 +86,7 @@ def main() -> None:
     os.environ["ADAPTVPR_DISABLE_MOCK"] = "0" if args.mock else "1"
     os.environ["ADAPTVPR_FORCE_MOCK_LLM"] = "1" if args.mock else "0"
 
-    from generation.agent import SceneAugmentAgent
+    from generation.agent import SceneAugmentAgent, scheduler_manifest
     from generation.batch import (
         atomic_write_json,
         build_summary,
@@ -125,6 +127,15 @@ def main() -> None:
     if not tasks:
         raise RuntimeError("No input records or supported images were found")
 
+    # The online quota scheduler and Global-weather tie breaker are intentionally
+    # single-process and order-sensitive. Record the exact order and seed so a
+    # planning run can be reconstructed from its experiment manifest.
+    random.seed(args.seed)
+    ordered_sample_ids = [task["sample_id"] for task in tasks]
+    input_order_sha256 = hashlib.sha256(
+        "\n".join(ordered_sample_ids).encode("utf-8")
+    ).hexdigest()
+
     args.output.mkdir(parents=True, exist_ok=True)
     manifest = {
         "mode": args.mode,
@@ -141,6 +152,22 @@ def main() -> None:
         "planner_api_base": os.getenv("ADAPTVPR_PLANNER_API_BASE", "http://127.0.0.1:23002/v1"),
         "iclight_api_url": os.getenv("ICLIGHT_API_URL", "http://127.0.0.1:8002/generate"),
         "lightx2v_api_url": os.getenv("LIGHTX2V_API_URL", "http://127.0.0.1:8001/generate"),
+        "scheduler": scheduler_manifest(),
+        "scheduler_runtime": {
+            "input_order": (
+                "lexicographic_recursive_path"
+                if args.mode == "plan" and args.input.is_dir()
+                else "single_input"
+                if args.mode == "plan"
+                else "jsonl_line_order"
+            ),
+            "ordered_sample_ids_sha256": input_order_sha256,
+            "ordered_sample_ids": ordered_sample_ids,
+            "limit": args.limit,
+            "worker_count": 1,
+            "batch_semantics": "one shared online scheduler state for this invocation",
+            "parallel_semantics": "planning is serial; parallel planners require independent manifests",
+        },
     }
     manifest_path = args.output / "experiment.json"
     comparable_keys = (
@@ -152,6 +179,8 @@ def main() -> None:
         "seed",
         "mock",
         "require_generated",
+        "scheduler",
+        "scheduler_runtime",
     )
     if args.resume and manifest_path.is_file():
         existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

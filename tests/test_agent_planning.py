@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import types
@@ -13,7 +14,7 @@ dotenv.load_dotenv = lambda *_args, **_kwargs: None
 sys.modules.setdefault("dotenv", dotenv)
 sys.modules.setdefault("numpy", types.ModuleType("numpy"))
 
-from generation.agent import SceneAugmentAgent
+from generation.agent import SceneAugmentAgent, _ratios_from_env, scheduler_manifest
 from generation.inputs import parse_condition
 from prompts.rules import build_structured_prompt
 from verification.evaluator import DualTraitEvaluator
@@ -201,6 +202,53 @@ class AgentPlanningTest(unittest.TestCase):
         self.assertEqual(agent.route_counts["global"], 1)
         self.assertEqual(len(llm.calls), 1)
         self.assertIn("weather_score in [0,1]", llm.calls[0]["system"])
+
+    def test_scheduler_golden_sequence_preserves_balanced_generation_routes(self):
+        agent = SceneAugmentAgent.__new__(SceneAugmentAgent)
+        agent.route_counts = {"skip": 0, "global": 0, "local": 0, "dual": 0}
+        agent.weather_counts = {
+            "fog": 0,
+            "night": 0,
+            "overcast": 0,
+            "rain": 0,
+            "snow": 0,
+        }
+        agent.global_weather_counts = dict(agent.weather_counts)
+        agent.global_weather_pass_counts = dict(agent.weather_counts)
+        agent.occlusion_counts = {"vehicle": 0, "person": 0}
+        raw = {
+            "weather_score": 0.90,
+            "occlusion_score": 0.90,
+            "bad_image": False,
+            "weather": "overcast",
+            "occlusion": "vehicle",
+            "position": "right traffic lane",
+            "reason": "both edits are feasible",
+        }
+
+        routes = []
+        for _ in range(12):
+            decision = agent._schedule_route_from_capabilities(dict(raw))
+            routes.append(decision["route"])
+            agent._record_decision_counts(decision)
+
+        self.assertEqual(routes, ["global", "local", "dual"] * 4)
+        self.assertEqual(
+            agent.route_counts,
+            {"skip": 0, "global": 4, "local": 4, "dual": 4},
+        )
+        self.assertEqual(
+            scheduler_manifest()["target_route_ratios"],
+            {"skip": 0.25, "global": 0.25, "local": 0.25, "dual": 0.25},
+        )
+
+    def test_scheduler_ratio_configuration_is_normalized(self):
+        with patch.dict(os.environ, {"ADAPTVPR_TEST_RATIOS": "a:1,b:3"}):
+            ratios = _ratios_from_env(
+                "ADAPTVPR_TEST_RATIOS",
+                {"a": 0.5, "b": 0.5},
+            )
+        self.assertEqual(ratios, {"a": 0.25, "b": 0.75})
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ __pycache__/
 *.jpg
 *.png
 !assets/Method.png
+!tests/output/
+!tests/output/*.png
 *.pth
 *.pt
 *.bin

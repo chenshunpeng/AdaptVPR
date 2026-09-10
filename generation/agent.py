@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 from dataclasses import dataclass
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
 from PIL import Image
@@ -30,6 +31,23 @@ from prompts.rules import (
     normalize_weather,
     predict_bad_image,
 )
+
+
+def _scoped_clip_reference_cache(method):
+    """Clear the evaluator's one-reference CLIP cache around one sample."""
+
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        clear = getattr(getattr(self, "evaluator", None), "clear_clip_cache", None)
+        if clear is not None:
+            clear()
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            if clear is not None:
+                clear()
+
+    return wrapped
 
 
 @dataclass
@@ -60,14 +78,9 @@ VLM_MODEL = os.getenv(
     "ADAPTVPR_PLANNER_MODEL",
     "qwen3-vl-4b-instruct-remote",
 )
-def _route_ratios_from_env() -> dict[str, float]:
-    ratios = {
-        "skip": 0.25,
-        "global": 0.25,
-        "local": 0.25,
-        "dual": 0.25,
-    }
-    raw = os.getenv("ADAPTVPR_TARGET_ROUTE_RATIOS", "").strip()
+def _ratios_from_env(name: str, defaults: dict[str, float]) -> dict[str, float]:
+    ratios = dict(defaults)
+    raw = os.getenv(name, "").strip()
     if not raw:
         return ratios
     parsed: dict[str, float] = {}
@@ -87,8 +100,20 @@ def _route_ratios_from_env() -> dict[str, float]:
     ratios.update(parsed)
     total = sum(ratios.values())
     if total <= 0:
-        return ratios
+        return dict(defaults)
     return {key: value / total for key, value in ratios.items()}
+
+
+def _route_ratios_from_env() -> dict[str, float]:
+    return _ratios_from_env(
+        "ADAPTVPR_TARGET_ROUTE_RATIOS",
+        {
+            "skip": 0.25,
+            "global": 0.25,
+            "local": 0.25,
+            "dual": 0.25,
+        },
+    )
 
 
 TARGET_ROUTE_RATIOS = _route_ratios_from_env()
@@ -100,18 +125,55 @@ CAPABILITY_WEIGHT = float(os.getenv("ADAPTVPR_CAPABILITY_WEIGHT", "0.25"))
 MIN_RATIO = float(os.getenv("ADAPTVPR_MIN_ROUTE_RATIO", "0.20"))
 MAX_RATIO = float(os.getenv("ADAPTVPR_MAX_ROUTE_RATIO", "0.30"))
 MIN_RATIO_DEFICIT_MULTIPLIER = float(os.getenv("ADAPTVPR_MIN_ROUTE_DEFICIT_MULTIPLIER", "2.0"))
-GLOBAL_WEATHER_TARGET_RATIOS = {
-    "overcast": 0.20,
-    "fog": 0.20,
-    "rain": 0.20,
-    "snow": 0.20,
-    "night": 0.20,
-}
+GLOBAL_WEATHER_TARGET_RATIOS = _ratios_from_env(
+    "ADAPTVPR_GLOBAL_WEATHER_TARGET_RATIOS",
+    {
+        "overcast": 0.20,
+        "fog": 0.20,
+        "rain": 0.20,
+        "snow": 0.20,
+        "night": 0.20,
+    },
+)
 GLOBAL_WEATHER_ORDER = ("overcast", "fog", "rain", "snow", "night")
-GLOBAL_SAFE_WEATHERS = ("overcast", "fog")
+GLOBAL_SAFE_WEATHERS = tuple(
+    weather
+    for weather in (
+        item.strip().lower()
+        for item in os.getenv("ADAPTVPR_GLOBAL_SAFE_WEATHERS", "overcast,fog").split(",")
+    )
+    if weather in GLOBAL_WEATHER_ORDER
+) or ("overcast", "fog")
 GLOBAL_MAX_SINGLE_WEATHER_RATIO = float(os.getenv("ADAPTVPR_GLOBAL_MAX_WEATHER_RATIO", "0.50"))
 GLOBAL_ICLIGHT_HIGHRES_DENOISE = float(os.getenv("ADAPTVPR_GLOBAL_ICLIGHT_DENOISE", "0.30"))
 GLOBAL_RAIN_ICLIGHT_HIGHRES_DENOISE = float(os.getenv("ADAPTVPR_GLOBAL_RAIN_ICLIGHT_DENOISE", "0.22"))
+
+
+def scheduler_manifest() -> dict:
+    """Return the effective public scheduler configuration for experiment logs."""
+
+    return {
+        "algorithm": "online_capability_quota_v1",
+        "target_route_ratios": dict(TARGET_ROUTE_RATIOS),
+        "target_lightx2v_ratio": TARGET_LIGHTX2V_RATIO,
+        "weather_threshold": WEATHER_THRESHOLD,
+        "occlusion_threshold": OCCLUSION_THRESHOLD,
+        "deficit_weight": DEFICIT_WEIGHT,
+        "capability_weight": CAPABILITY_WEIGHT,
+        "min_route_ratio": MIN_RATIO,
+        "max_route_ratio": MAX_RATIO,
+        "min_route_deficit_multiplier": MIN_RATIO_DEFICIT_MULTIPLIER,
+        "route_tie_break_order": ["global", "local", "dual"],
+        "global_weather_target_ratios": dict(GLOBAL_WEATHER_TARGET_RATIOS),
+        "global_safe_weathers": list(GLOBAL_SAFE_WEATHERS),
+        "global_max_weather_ratio": GLOBAL_MAX_SINGLE_WEATHER_RATIO,
+        "state_initialization": {
+            "route_counts": {"skip": 0, "global": 0, "local": 0, "dual": 0},
+            "global_weather_counts": {weather: 0 for weather in GLOBAL_WEATHER_ORDER},
+            "global_weather_pass_counts": {weather: 0 for weather in GLOBAL_WEATHER_ORDER},
+        },
+        "state_scope": "one SceneAugmentAgent instance per run.py invocation",
+    }
 SYSTEM_PROMPT = """You are a strict VPR image augmentation capability scorer.
 Return only one JSON object. Do not use markdown.
 Do not choose or output the final route. The final route is selected by a quota
@@ -502,6 +564,7 @@ Return this JSON schema:
             "router_error": reason,
         }
 
+    @_scoped_clip_reference_cache
     def run_path(
         self,
         image_path: str | Path,
@@ -736,6 +799,7 @@ Return this JSON schema:
 
         return record
 
+    @_scoped_clip_reference_cache
     def run(self, input_image: Image.Image, save_dir: str = None, entry: dict = None) -> AgentResult:
         print("\n" + "=" * 50)
         print("[Agent] ===== Processing started =====")

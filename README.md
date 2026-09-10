@@ -7,6 +7,13 @@ Official repository for [AdaptVPR: Route-Aware Hard Positive Generation for Robu
   <a href="https://huggingface.co/datasets/shunpeng/AdaptCities"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-AdaptCities-FFD21E?style=flat-square&amp;labelColor=444444" alt="Hugging Face Dataset"></a>
 </p>
 
+## 📢 News
+
+- **2026-09-10** — ⚡ Improved planning reproducibility and verification efficiency with fully documented scheduler configuration and content-validated CLIP reference-feature caching.
+- **2026-09** — 📄 Paper released on arXiv: [AdaptVPR: Route-Aware Hard Positive Generation for Robust Visual Place Recognition](https://arxiv.org/abs/2609.04369).
+- **2026-09** — 🚀 Released the AdaptVPR generation code, verification pipeline, prompt templates, and reproducibility documentation.
+- **2026-09** — 📦 Released the AdaptCities prompts, annotations, and metadata on [Hugging Face](https://huggingface.co/datasets/shunpeng/AdaptCities).
+
 ## 📝 Method overview
 
 ![Overview of the AdaptVPR framework](assets/Method.png)
@@ -43,7 +50,8 @@ workspace/
     │   └── default.env.example        # Public configuration template
     ├── docs/
     │   ├── EXTERNAL_COMPONENTS.md     # Third-party setup and integration map
-    │   └── API_CONTRACTS.md           # Generator HTTP service contracts
+    │   ├── API_CONTRACTS.md           # Generator HTTP service contracts
+    │   └── SCHEDULER.md               # Route quotas, parameters, and run semantics
     ├── examples/
     │   ├── generated_prompts.example.jsonl
     │   └── annotations_metadata.example.jsonl
@@ -90,11 +98,14 @@ Install and configure IC-Light, Qwen-LightX2V, VisMatch, and a Qwen3-VL-4B-Instr
 | Appearance verifier | [CLIP ViT-B/32](https://huggingface.co/openai/clip-vit-base-patch32) | Transformers local loading | `openai/clip-vit-base-patch32` |
 | Geometry verifier | [VisMatch (SuperPoint + LightGlue)](https://github.com/gmberton/vismatch) | Local Python import | `superpoint-lightglue` |
 
-See [External components](docs/EXTERNAL_COMPONENTS.md) for setup responsibilities and [API contracts](docs/API_CONTRACTS.md) for the IC-Light and LightX2V interfaces.
+See [Scheduler specification](docs/SCHEDULER.md) for the route-allocation parameters and exact quota rule, [External components](docs/EXTERNAL_COMPONENTS.md) for setup responsibilities, and [API contracts](docs/API_CONTRACTS.md) for the IC-Light and LightX2V interfaces.
 
 ## ⚡ Quick Demo
 
 Before running a full generation job, use the ten GSV-Cities paths listed in `tests/demo_10.csv` to quickly check the planning, generation, reflection, and verification pipeline. Source images are not included; run:
+
+Source-to-generated image comparisons for this 10-image Quick Demo set are
+available in [`tests/output`](tests/output).
 
 ```bash
 python tests/run_demo_10.py \
