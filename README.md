@@ -157,3 +157,20 @@ If you find this repository useful for your research, please consider giving it 
   year    = {2026}
 }
 ```
+
+## AdaptVPR Matching Demo
+
+<p align="center">
+  <img src="assets/matching_demos/01_global16_prague_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/02_local08_madrid_5s_loop.gif" width="48%" />
+</p>
+
+<p align="center">
+  <img src="assets/matching_demos/03_local00007_bangkok_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/04_dual_demo02_bangkok_5s_loop.gif" width="48%" />
+</p>
+
+<p align="center">
+  <img src="assets/matching_demos/05_dual_demo07_bangkok_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/06_dual06_lisbon_5s_loop.gif" width="48%" />
+</p>
