@@ -7,6 +7,21 @@ Official repository for [AdaptVPR: Route-Aware Hard Positive Generation for Robu
   <a href="https://huggingface.co/datasets/shunpeng/AdaptCities"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-AdaptCities-FFD21E?style=flat-square&amp;labelColor=444444" alt="Hugging Face Dataset"></a>
 </p>
 
+<p align="center">
+  <img src="assets/matching_demos/01_global16_prague_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/02_local08_madrid_5s_loop.gif" width="48%" />
+</p>
+
+<p align="center">
+  <img src="assets/matching_demos/03_local00007_bangkok_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/04_dual_demo02_bangkok_5s_loop.gif" width="48%" />
+</p>
+
+<p align="center">
+  <img src="assets/matching_demos/05_dual_demo07_bangkok_5s_loop.gif" width="48%" />
+  <img src="assets/matching_demos/06_dual06_lisbon_5s_loop.gif" width="48%" />
+</p>
+
 ## 📢 News
 
 - **2026-09-10** — ⚡ Improved planning reproducibility and verification efficiency with fully documented scheduler configuration and content-validated CLIP reference-feature caching.
@@ -157,20 +172,3 @@ If you find this repository useful for your research, please consider giving it 
   year    = {2026}
 }
 ```
-
-## AdaptVPR Matching Demo
-
-<p align="center">
-  <img src="assets/matching_demos/01_global16_prague_5s_loop.gif" width="48%" />
-  <img src="assets/matching_demos/02_local08_madrid_5s_loop.gif" width="48%" />
-</p>
-
-<p align="center">
-  <img src="assets/matching_demos/03_local00007_bangkok_5s_loop.gif" width="48%" />
-  <img src="assets/matching_demos/04_dual_demo02_bangkok_5s_loop.gif" width="48%" />
-</p>
-
-<p align="center">
-  <img src="assets/matching_demos/05_dual_demo07_bangkok_5s_loop.gif" width="48%" />
-  <img src="assets/matching_demos/06_dual06_lisbon_5s_loop.gif" width="48%" />
-</p>
