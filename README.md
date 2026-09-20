@@ -2,10 +2,29 @@
 
 Official repository for [AdaptVPR: Route-Aware Hard Positive Generation for Robust Visual Place Recognition](https://arxiv.org/abs/2609.04369).
 
-<p align="center">
+<div align="center">
   <a href="https://arxiv.org/abs/2609.04369"><img src="https://img.shields.io/badge/arXiv-2609.04369-D32F2F?style=flat-square&amp;labelColor=444444" alt="arXiv"></a>
   <a href="https://huggingface.co/datasets/shunpeng/AdaptCities"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-AdaptCities-FFD21E?style=flat-square&amp;labelColor=444444" alt="Hugging Face Dataset"></a>
-</p>
+  <br>
+  <a href="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge-link?eval=31613">
+    <img src="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge.svg?eval=31613&live=1" alt="Papers with Code: SOTA on Nordland (2,760 summer queries, ±1 frame)">
+  </a>
+  <a href="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge-link?eval=31618">
+    <img src="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge.svg?eval=31618&live=1" alt="Papers with Code: SOTA on SF-XL Occlusion">
+  </a>
+  <br>
+  <a href="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge-link?eval=31603">
+    <img src="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge.svg?eval=31603&live=1" alt="Papers with Code: SOTA on Tokyo 24/7">
+  </a>
+  <a href="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge-link?eval=31621">
+    <img src="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge.svg?eval=31621&live=1" alt="Papers with Code: #2 on SF-XL Night">
+  </a>
+  <a href="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge-link?eval=31616">
+    <img src="https://paperswithcode.co/api/v1/papers/2609.04369/leaderboard-badge.svg?eval=31616&live=1" alt="Papers with Code: #2 on SF-XL test v1">
+  </a>
+</div>
+
+<br>
 
 <p align="center">
   <img src="assets/matching_demos/01_global16_prague_5s_loop.gif" width="48%" />
